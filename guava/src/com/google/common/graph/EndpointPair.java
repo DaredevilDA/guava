@@ -24,7 +24,7 @@ import com.google.common.base.Objects;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.UnmodifiableIterator;
 import com.google.errorprone.annotations.Immutable;
-import javax.annotation.Nullable;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
 /**
  * An immutable pair representing the two endpoints of an edge in a graph. The {@link EndpointPair}
@@ -110,8 +110,7 @@ public abstract class EndpointPair<N> implements Iterable<N> {
     } else if (node.equals(nodeV)) {
       return nodeU;
     } else {
-      throw new IllegalArgumentException(
-          String.format("EndpointPair %s does not contain node %s", this, node));
+      throw new IllegalArgumentException("EndpointPair " + this + " does not contain node " + node);
     }
   }
 
@@ -187,7 +186,7 @@ public abstract class EndpointPair<N> implements Iterable<N> {
 
     @Override
     public String toString() {
-      return String.format("<%s -> %s>", source(), target());
+      return "<" + source() + " -> " + target() + ">";
     }
   }
 
@@ -247,7 +246,7 @@ public abstract class EndpointPair<N> implements Iterable<N> {
 
     @Override
     public String toString() {
-      return String.format("[%s, %s]", nodeU(), nodeV());
+      return "[" + nodeU() + ", " + nodeV() + "]";
     }
   }
 }

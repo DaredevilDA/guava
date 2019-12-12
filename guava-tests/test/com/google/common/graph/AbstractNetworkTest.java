@@ -16,17 +16,26 @@
 
 package com.google.common.graph;
 
+import static com.google.common.graph.TestUtil.ERROR_NODE_NOT_IN_GRAPH;
+import static com.google.common.graph.TestUtil.assertEdgeNotInGraphErrorMessage;
+import static com.google.common.graph.TestUtil.assertNodeNotInGraphErrorMessage;
 import static com.google.common.graph.TestUtil.assertStronglyEquivalent;
 import static com.google.common.graph.TestUtil.sanityCheckSet;
 import static com.google.common.truth.Truth.assertThat;
+import static java.util.concurrent.Executors.newFixedThreadPool;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -40,8 +49,8 @@ import org.junit.Test;
  * graph. The following test cases are left for the subclasses to handle:
  *
  * <ul>
- * <li>Test cases related to whether the graph is directed, undirected, mutable, or immutable.
- * <li>Test cases related to the specific implementation of the {@link Network} interface.
+ *   <li>Test cases related to whether the graph is directed, undirected, mutable, or immutable.
+ *   <li>Test cases related to the specific implementation of the {@link Network} interface.
  * </ul>
  *
  * TODO(user): Make this class generic (using <N, E>) for all node and edge types.
@@ -76,16 +85,11 @@ public abstract class AbstractNetworkTest {
   // here to provide error messages.
   // TODO(user): Some Strings used in the subclasses can be added as static Strings
   // here too.
-  static final String ERROR_ELEMENT_NOT_IN_GRAPH = "not an element of this graph";
-  static final String NODE_STRING = "Node";
-  static final String EDGE_STRING = "Edge";
   static final String ERROR_PARALLEL_EDGE = "connected by a different edge";
   static final String ERROR_REUSE_EDGE = "it cannot be reused to connect";
   static final String ERROR_MODIFIABLE_COLLECTION =
       "Collection returned is unexpectedly modifiable";
   static final String ERROR_SELF_LOOP = "self-loops are not allowed";
-  static final String ERROR_NODE_NOT_IN_GRAPH =
-      "Should not be allowed to pass a node that is not an element of the graph.";
   static final String ERROR_EDGE_NOT_IN_GRAPH =
       "Should not be allowed to pass an edge that is not an element of the graph.";
   static final String ERROR_ADDED_SELF_LOOP = "Should not be allowed to add a self-loop edge.";
@@ -122,6 +126,8 @@ public abstract class AbstractNetworkTest {
    * add an edge whose end-points don't already exist in the graph), you should <b>not</b> use this
    * method.
    *
+   * <p>TODO(user): remove the addNode() calls, that's now contractually guaranteed
+   *
    * @return {@code true} iff the graph was modified as a result of this call
    */
   @CanIgnoreReturnValue
@@ -129,6 +135,12 @@ public abstract class AbstractNetworkTest {
     network.addNode(n1);
     network.addNode(n2);
     return network.addEdge(n1, n2, e);
+  }
+
+  protected boolean addEdge(EndpointPair<Integer> endpoints, String e) {
+    network.addNode(endpoints.nodeU());
+    network.addNode(endpoints.nodeV());
+    return network.addEdge(endpoints, e);
   }
 
   @Before
@@ -217,13 +229,30 @@ public abstract class AbstractNetworkTest {
 
       for (N otherNode : network.nodes()) {
         Set<E> edgesConnecting = sanityCheckSet(network.edgesConnecting(node, otherNode));
-        if (edgesConnecting.size() <= 1) {
-          assertThat(network.edgeConnecting(node, otherNode).asSet()).isEqualTo(edgesConnecting);
-        } else {
-          try {
-            network.edgeConnecting(node, otherNode);
-            fail();
-          } catch (IllegalArgumentException expected) {}
+        switch (edgesConnecting.size()) {
+          case 0:
+            assertThat(network.edgeConnectingOrNull(node, otherNode)).isNull();
+            assertThat(network.edgeConnecting(node, otherNode).isPresent()).isFalse();
+            assertThat(network.hasEdgeConnecting(node, otherNode)).isFalse();
+            break;
+          case 1:
+            E edge = edgesConnecting.iterator().next();
+            assertThat(network.edgeConnectingOrNull(node, otherNode)).isEqualTo(edge);
+            assertThat(network.edgeConnecting(node, otherNode).get()).isEqualTo(edge);
+            assertThat(network.hasEdgeConnecting(node, otherNode)).isTrue();
+            break;
+          default:
+            assertThat(network.hasEdgeConnecting(node, otherNode)).isTrue();
+            try {
+              network.edgeConnectingOrNull(node, otherNode);
+              fail();
+            } catch (IllegalArgumentException expected) {
+            }
+            try {
+              network.edgeConnecting(node, otherNode);
+              fail();
+            } catch (IllegalArgumentException expected) {
+            }
         }
 
         boolean isSelfLoop = node.equals(otherNode);
@@ -512,6 +541,22 @@ public abstract class AbstractNetworkTest {
   }
 
   @Test
+  public void hasEdgeConnecting_disconnectedNodes() {
+    addNode(N1);
+    addNode(N2);
+    assertThat(network.hasEdgeConnecting(N1, N2)).isFalse();
+  }
+
+  @Test
+  public void hasEdgesConnecting_nodesNotInGraph() {
+    addNode(N1);
+    addNode(N2);
+    assertThat(network.hasEdgeConnecting(N1, NODE_NOT_IN_GRAPH)).isFalse();
+    assertThat(network.hasEdgeConnecting(NODE_NOT_IN_GRAPH, N2)).isFalse();
+    assertThat(network.hasEdgeConnecting(NODE_NOT_IN_GRAPH, NODE_NOT_IN_GRAPH)).isFalse();
+  }
+
+  @Test
   public void inEdges_noInEdges() {
     addNode(N1);
     assertThat(network.inEdges(N1)).isEmpty();
@@ -663,13 +708,63 @@ public abstract class AbstractNetworkTest {
     }
   }
 
-  static void assertNodeNotInGraphErrorMessage(Throwable throwable) {
-    assertThat(throwable.getMessage()).startsWith(NODE_STRING);
-    assertThat(throwable.getMessage()).contains(ERROR_ELEMENT_NOT_IN_GRAPH);
-  }
+  @Test
+  public void concurrentIteration() throws Exception {
+    addEdge(1, 2, "foo");
+    addEdge(3, 4, "bar");
+    addEdge(5, 6, "baz");
 
-  static void assertEdgeNotInGraphErrorMessage(Throwable throwable) {
-    assertThat(throwable.getMessage()).startsWith(EDGE_STRING);
-    assertThat(throwable.getMessage()).contains(ERROR_ELEMENT_NOT_IN_GRAPH);
+    int threadCount = 20;
+    ExecutorService executor = newFixedThreadPool(threadCount);
+    final CyclicBarrier barrier = new CyclicBarrier(threadCount);
+    ImmutableList.Builder<Future<?>> futures = ImmutableList.builder();
+    for (int i = 0; i < threadCount; i++) {
+      futures.add(
+          executor.submit(
+              new Callable<Object>() {
+                @Override
+                public Object call() throws Exception {
+                  barrier.await();
+                  Integer first = network.nodes().iterator().next();
+                  for (Integer node : network.nodes()) {
+                    Set<Integer> unused = network.successors(node);
+                  }
+                  /*
+                   * Also look up an earlier node so that, if the graph is using MapRetrievalCache,
+                   * we read one of the fields declared in that class.
+                   */
+                  Set<Integer> unused = network.successors(first);
+                  return null;
+                }
+              }));
+    }
+
+    /*
+     * It's unlikely that any operations would fail by throwing an exception, but let's check them
+     * just to be safe.
+     *
+     * The real purpose of this test is to produce a TSAN failure if MapIteratorCache is unsafe for
+     * reads from multiple threads -- unsafe, in fact, even in the absence of a concurrent write.
+     * The specific problem we had was unsafe reads of lastEntryReturnedBySomeIterator. (To fix the
+     * problem, we've since marked that field as volatile.)
+     *
+     * When MapIteratorCache is used from Immutable* classes, the TSAN failure doesn't indicate a
+     * real problem: The Entry objects are ImmutableMap entries, whose fields are all final and thus
+     * safe to read even when the Entry object is unsafely published. But with a mutable graph, the
+     * Entry object is likely to have a non-final value field, which is not safe to read when
+     * unsafely published. (The Entry object might even be newly created by each iterator.next()
+     * call, so we can't assume that writes to the Entry have been safely published by some other
+     * synchronization actions.)
+     *
+     * All that said: I haven't actually managed to make this particular test produce a TSAN error
+     * for the field accesses in MapIteratorCache. This teset *has* found other TSAN errors,
+     * including in MapRetrievalCache, so I'm not sure why this one is different. I did at least
+     * confirm that my change to MapIteratorCache fixes the TSAN error in the (larger) test it was
+     * originally reported in.
+     */
+    for (Future<?> future : futures.build()) {
+      future.get();
+    }
+    executor.shutdown();
   }
 }

@@ -16,11 +16,11 @@ package com.google.common.util.concurrent;
 
 import com.google.common.annotations.GwtCompatible;
 import java.util.concurrent.Future;
-import javax.annotation.Nullable;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
 /**
  * Transforms a value, possibly asynchronously. For an example usage and more information, see
- * {@link Futures#transformAsync(ListenableFuture, AsyncFunction)}.
+ * {@link Futures#transformAsync(ListenableFuture, AsyncFunction, Executor)}.
  *
  * @author Chris Povirk
  * @since 11.0

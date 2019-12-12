@@ -30,7 +30,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
-import javax.annotation.Nullable;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
 /**
  * An implementation of {@link NetworkConnections} for undirected networks with parallel edges.
@@ -47,16 +47,15 @@ final class UndirectedMultiNetworkConnections<N, E>
   }
 
   static <N, E> UndirectedMultiNetworkConnections<N, E> of() {
-    return new UndirectedMultiNetworkConnections<N, E>(
+    return new UndirectedMultiNetworkConnections<>(
         new HashMap<E, N>(INNER_CAPACITY, INNER_LOAD_FACTOR));
   }
 
   static <N, E> UndirectedMultiNetworkConnections<N, E> ofImmutable(Map<E, N> incidentEdges) {
-    return new UndirectedMultiNetworkConnections<N, E>(ImmutableMap.copyOf(incidentEdges));
+    return new UndirectedMultiNetworkConnections<>(ImmutableMap.copyOf(incidentEdges));
   }
 
-  @LazyInit
-  private transient Reference<Multiset<N>> adjacentNodesReference;
+  @LazyInit private transient Reference<Multiset<N>> adjacentNodesReference;
 
   @Override
   public Set<N> adjacentNodes() {
@@ -67,13 +66,13 @@ final class UndirectedMultiNetworkConnections<N, E>
     Multiset<N> adjacentNodes = getReference(adjacentNodesReference);
     if (adjacentNodes == null) {
       adjacentNodes = HashMultiset.create(incidentEdgeMap.values());
-      adjacentNodesReference = new SoftReference<Multiset<N>>(adjacentNodes);
+      adjacentNodesReference = new SoftReference<>(adjacentNodes);
     }
     return adjacentNodes;
   }
 
   @Override
-  public Set<E> edgesConnecting(final Object node) {
+  public Set<E> edgesConnecting(final N node) {
     return new MultiEdgesConnecting<E>(incidentEdgeMap, node) {
       @Override
       public int size() {
@@ -83,7 +82,7 @@ final class UndirectedMultiNetworkConnections<N, E>
   }
 
   @Override
-  public N removeInEdge(Object edge, boolean isSelfLoop) {
+  public N removeInEdge(E edge, boolean isSelfLoop) {
     if (!isSelfLoop) {
       return removeOutEdge(edge);
     }
@@ -91,7 +90,7 @@ final class UndirectedMultiNetworkConnections<N, E>
   }
 
   @Override
-  public N removeOutEdge(Object edge) {
+  public N removeOutEdge(E edge) {
     N node = super.removeOutEdge(edge);
     Multiset<N> adjacentNodes = getReference(adjacentNodesReference);
     if (adjacentNodes != null) {
@@ -116,8 +115,7 @@ final class UndirectedMultiNetworkConnections<N, E>
     }
   }
 
-  @Nullable
-  private static <T> T getReference(@Nullable Reference<T> reference) {
+  private static <T> @Nullable T getReference(@Nullable Reference<T> reference) {
     return (reference == null) ? null : reference.get();
   }
 }
